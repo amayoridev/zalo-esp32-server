@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Máy Chủ Quản Lý Hộp Thuốc ESP32 & Zalo Bot</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --text: #f8fafc;
+      --subtext: #94a3b8;
+      --accent: #0ea5e9;
+      --accent-hover: #0284c7;
+      --success: #10b981;
+      --danger: #ef4444;
+      --warning: #f59e0b;
+      --border: #334155;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; }
+    body { background-color: var(--bg); color: var(--text); padding: 20px; line-height: 1.5; }
+    
+    .container { max-width: 1200px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
+    
+    header {
+      display: flex; justify-content: space-between; align-items: center;
+      background: var(--card); padding: 20px 25px; border-radius: 12px; border: 1px solid var(--border);
+    }
+    header h1 { font-size: 1.5rem; color: var(--accent); display: flex; align-items: center; gap: 10px; }
+
+    .status-badge {
+      display: inline-flex; align-items: center; gap: 8px; padding: 6px 14px; border-radius: 20px;
+      font-weight: 600; font-size: 0.9rem;
+    }
+    .status-badge.online { background: rgba(16, 185, 129, 0.15); color: var(--success); border: 1px solid var(--success); }
+    .status-badge.offline { background: rgba(239, 68, 68, 0.15); color: var(--danger); border: 1px solid var(--danger); }
+
+    .grid-metrics {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 15px;
+    }
+    .metric-card {
+      background: var(--card); border: 1px solid var(--border); padding: 18px; border-radius: 10px;
+    }
+    .metric-card .title { font-size: 0.85rem; color: var(--subtext); text-transform: uppercase; font-weight: 600; }
+    .metric-card .val { font-size: 1.4rem; font-weight: 700; color: var(--text); margin-top: 6px; }
+    .metric-card .sub { font-size: 0.8rem; color: var(--warning); margin-top: 4px; }
+
+    .main-grid { display: grid; grid-template-columns: 2fr 1fr; gap: 20px; }
+    @media (max-width: 900px) { .main-grid { grid-template-columns: 1fr; } }
+
+    .section-card {
+      background: var(--card); border: 1px solid var(--border); padding: 20px; border-radius: 12px;
+    }
+    .section-card h2 { font-size: 1.2rem; color: var(--accent); margin-bottom: 15px; display: flex; justify-content: space-between; align-items: center; }
+
+    .alarm-grid {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; max-height: 550px; overflow-y: auto; padding-right: 5px;
+    }
+    .alarm-slot {
+      background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border); padding: 12px; border-radius: 8px;
+      display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    }
+    .alarm-slot label { font-weight: 600; font-size: 0.9rem; color: var(--accent); width: 85px; }
+    .alarm-slot input[type="time"] {
+      background: var(--bg); color: var(--text); border: 1px solid var(--border); padding: 6px 8px;
+      border-radius: 6px; font-size: 0.9rem; outline: none;
+    }
+    .alarm-slot select {
+      background: var(--bg); color: var(--text); border: 1px solid var(--border); padding: 6px 8px;
+      border-radius: 6px; font-size: 0.85rem; outline: none;
+    }
+    .btn-save {
+      background: var(--accent); color: #fff; border: none; padding: 6px 12px; border-radius: 6px;
+      cursor: pointer; font-weight: 600; font-size: 0.85rem; transition: 0.2s;
+    }
+    .btn-save:hover { background: var(--accent-hover); }
+
+    .log-container {
+      background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 12px;
+      height: 480px; overflow-y: auto; font-family: monospace; font-size: 0.82rem;
+    }
+    .log-item { margin-bottom: 8px; border-bottom: 1px dotted var(--border); padding-bottom: 6px; }
+    .log-item .time { color: var(--subtext); }
+    .log-item.ping { color: var(--success); }
+    .log-item.ip_change { color: var(--warning); font-weight: bold; }
+    .log-item.alarm_queue { color: var(--accent); }
+    .log-item.zalo_sent { color: #c084fc; }
+    .log-item.zalo_error { color: var(--danger); }
+
+    .banner-notice {
+      background: rgba(245, 158, 11, 0.1); border: 1px solid var(--warning); color: #fde68a;
+      padding: 12px 18px; border-radius: 8px; font-size: 0.9rem; margin-bottom: 10px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>💊 ESP32 Smart Pill Box Server</h1>
+      <div id="statusBadge" class="status-badge offline">
+        <span id="statusDot">🔴</span> <span id="statusText">Đang tải...</span>
+      </div>
+    </header>
+
+    <div class="banner-notice">
+      🔒 <strong>Cơ chế tự động bypass Router Firewall (Không Port Forwarding):</strong> Server lưu lại địa chỉ IP của ESP32 mỗi khi ESP32 PING tới (`/esp-ping`). Lệnh điều khiển từ Zalo được đưa vào Hàng Đợi (Queue) và ESP32 chủ động rút về (`/esp-pull`) mỗi 3 giây.
+    </div>
+
+    <div class="grid-metrics">
+      <div class="metric-card">
+        <div class="title">IP ESP32 Ghi Nhận</div>
+        <div class="val" id="ipAddress">--.--.--.--</div>
+        <div class="sub" id="previousIp">IP cũ: Chưa có</div>
+      </div>
+      <div class="metric-card">
+        <div class="title">Lần Ping Cuối</div>
+        <div class="val" id="lastPing">--</div>
+        <div class="sub" id="pingCount">Tổng ping: 0</div>
+      </div>
+      <div class="metric-card">
+        <div class="title">Hàng Đợi Lệnh (Queue)</div>
+        <div class="val" id="pendingQueueLength">0 lệnh</div>
+        <div class="sub" id="pullCount">Tổng pull: 0</div>
+      </div>
+    </div>
+
+    <div class="main-grid">
+      <div class="section-card">
+        <h2>
+          <span>📋 Lịch Uống Thuốc (21 Cữ)</span>
+          <button class="btn-save" onclick="loadAlarms()">🔄 Tải lại</button>
+        </h2>
+        <div class="alarm-grid" id="alarmGrid">
+          <!-- Dynamically populated -->
+        </div>
+      </div>
+
+      <div class="section-card">
+        <h2><span>📜 Nhật Ký Hoạt Động (Live Logs)</span></h2>
+        <div class="log-container" id="logContainer">
+          <!-- Live logs -->
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    async function fetchStatus() {
+      try {
+        const res = await fetch('/api/status');
+        const data = await res.json();
+
+        const badge = document.getElementById('statusBadge');
+        if (data.isOnline) {
+          badge.className = 'status-badge online';
+          document.getElementById('statusDot').innerText = '🟢';
+          document.getElementById('statusText').innerText = 'ESP32 ONLINE';
+        } else {
+          badge.className = 'status-badge offline';
+          document.getElementById('statusDot').innerText = '🔴';
+          document.getElementById('statusText').innerText = 'ESP32 OFFLINE';
+        }
+
+        document.getElementById('ipAddress').innerText = data.ip || 'Chưa nhận diện';
+        document.getElementById('previousIp').innerText = data.previousIp ? `IP cũ: ${data.previousIp}` : 'IP cũ: Chưa ghi nhận';
+        
+        document.getElementById('lastPing').innerText = data.secondsSinceLastPing !== null ? `${data.secondsSinceLastPing}s trước` : 'Chưa có';
+        document.getElementById('pingCount').innerText = `Tổng Ping: ${data.pingCount}`;
+        
+        document.getElementById('pendingQueueLength').innerText = `${data.pendingQueueLength} lệnh chờ`;
+        document.getElementById('pullCount').innerText = `Tổng Pull: ${data.pullCount}`;
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    async function loadAlarms() {
+      try {
+        const res = await fetch('/api/alarms');
+        const alarms = await res.json();
+        
+        let html = '';
+        alarms.forEach(a => {
+          const hStr = String(a.h).padStart(2, '0');
+          const mStr = String(a.m).padStart(2, '0');
+          html += `
+            <div class="alarm-slot">
+              <label>${a.slotName}</label>
+              <input type="time" id="time_${a.id}" value="${hStr}:${mStr}">
+              <select id="en_${a.id}">
+                <option value="1" ${a.en ? 'selected' : ''}>BẬT</option>
+                <option value="0" ${!a.en ? 'selected' : ''}>TẮT</option>
+              </select>
+              <button class="btn-save" onclick="saveAlarm(${a.id})">Lưu</button>
+            </div>
+          `;
+        });
+        document.getElementById('alarmGrid').innerHTML = html;
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    async function saveAlarm(id) {
+      const timeVal = document.getElementById(`time_${id}`).value;
+      const enVal = document.getElementById(`en_${id}`).value;
+      if (!timeVal) return;
+
+      const [h, m] = timeVal.split(':');
+      try {
+        const res = await fetch('/api/alarms/set', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id, h: parseInt(h), m: parseInt(m), en: enVal === '1' })
+        });
+        const data = await res.json();
+        if (data.success) {
+          alert(`✅ Đã đưa cữ vào hàng đợi gửi ESP32!`);
+          fetchStatus();
+          loadLogs();
+        }
+      } catch (e) {
+        alert('Lỗi gửi dữ liệu!');
+      }
+    }
+
+    async function loadLogs() {
+      try {
+        const res = await fetch('/api/logs');
+        const logs = await res.json();
+        
+        let html = '';
+        logs.forEach(l => {
+          const t = new Date(l.timestamp).toLocaleTimeString();
+          html += `<div class="log-item ${l.type}">
+            <span class="time">[${t}]</span> <strong>[${l.type.toUpperCase()}]</strong> ${l.message}
+          </div>`;
+        });
+        document.getElementById('logContainer').innerHTML = html;
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    // Auto Refresh
+    setInterval(() => {
+      fetchStatus();
+      loadLogs();
+    }, 2000);
+
+    fetchStatus();
+    loadAlarms();
+    loadLogs();
+  </script>
+</body>
+</html>
